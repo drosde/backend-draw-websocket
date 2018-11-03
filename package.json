@@ -1,0 +1,10 @@
+{
+    "name": "backend-draw-websocket",
+    "version": "0.0.1",
+    "description": "realtime draw and chat using web sockets (socket.io) on node.js and angular v7",
+    "dependencies": {
+        "cors": "^2.8.4",
+        "express": "^4.16.4",
+        "socket.io": "^2.1.1"
+    }
+}
