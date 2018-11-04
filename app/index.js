@@ -72,7 +72,6 @@ io.on('connection', onConnection);
 
 function onConnection(socket){
     console.log('a user connected');
-
     // if(socket.handshake.query.joinRoom){
     //     let r = getRoom();
     //     if(r) socket.join(r.id);
@@ -80,29 +79,7 @@ function onConnection(socket){
 
     socket.on('join-room', (data) => {
         if(data.room && data.username){
-            socket.join(data.room, () => {
-                let r = getRoomById(data.room);
-                let user = {
-                    username: data.username,
-                    drawing: r.clients.length == 0 ? true : false,
-                    points: 0,
-                    id: socket.id,
-                }
-                if(r) r.clients.push(user)
-                console.log("Ingresando usuario a la sala: ", data.room + " "+ data.username);
-
-                // SEND USER CONNECTED EVENT TO ALL USERS IN THAT ROOM
-                socket.broadcast.in(data.room).emit('user-connected-room', user);
-
-                // SEND USERS IN THAT ROOM TO USER CONNECTED
-                io.sockets.to(socket.id).emit('users-in-room', r.clients);
-
-                // SEND WORD DATA TO CONNECTED
-                io.sockets.to(socket.id).emit('game-word-update', {
-                    wordLength: r.word.length,
-
-                });
-            });
+            socket.join(data.room, onSocketJoinRoom(socket, data));
         }
     });
     
@@ -120,7 +97,32 @@ function onConnection(socket){
     });
 
     socket.on('get-users-in-room', (room) => {
-        io.sockets.to(socket.id).emit('chat-message', message);
+        io.sockets.to(socket.id).emit('get-users-in-room', message);
+    });
+}
+
+function onSocketJoinRoom(socket, data){
+    let r = getRoomById(data.room);
+    let user = {
+        username: data.username,
+        drawing: r.clients.length == 0 ? true : false,
+        points: 0,
+        id: socket.id,
+    }
+
+    if(r) r.clients.push(user)
+    console.log("Ingresando usuario a la sala: ", data.room + " "+ data.username);
+
+    // SEND USER CONNECTED EVENT TO ALL USERS IN THAT ROOM
+    socket.broadcast.in(data.room).emit('user-connected-room', user);
+
+    // SEND USERS IN THAT ROOM TO USER CONNECTED
+    io.sockets.to(socket.id).emit('users-in-room', r.clients);
+
+    // SEND WORD DATA TO CONNECTED
+    io.sockets.to(socket.id).emit('game-word-update', {
+        wordLength: r.word.length,
+
     });
 }
 
