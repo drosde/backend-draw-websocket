@@ -6,8 +6,8 @@ const cors = require('cors');
 
 // simulate storage server
 var maxRoomClient = 5;
-var words = ('remera,iglesia,perro,gato,mariposa,cerveza,hacha,escuela'+
-            ',cama,calle,sol,murcielago,campana,mouse,auricular,tren,automovil,ventana').split(',');
+var words = ('remera,iglesia,perro,gato,mariposa,cerveza,hacha,escuela,'+
+            'cama,calle,sol,murcielago,campana,mouse,auricular,tren,automovil,ventana').split(',');
 var rooms = [{
     id: 'room1',
     clients: [],
@@ -45,16 +45,11 @@ var rooms = [{
 
 rooms.forEach(room => {
     room.word = getNewWord();
-    // room.tempWord = room.word; 
-    let r = randomInt(room.word.length - 1);
     room.gameHelpers.wordHint = "_".repeat(room.word.length);
-    // room.gameHelpers.wordHint = setCharAt(room.gameHelpers.wordHint, r, room.word.charAt(r));
 
-    let w_array = [];
-        room.word.split("").map(function(ltt, i){ w_array[i] = {pos: i, ltt: ltt}});
+    let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
 
     room.gameHelpers.shuffledWord = shuffle(w_array);
-    // room.gameHelpers.wordHint = isCharAtSimilar(room.wordHint,0, "_") ? setCharAt(room.wordHint, r, room.word.charAt(r)) : room.wordHint;
 })
 
 /**
@@ -95,25 +90,45 @@ io.on('connection', onConnection);
 
 function onConnection(socket){
     console.log('a user connected');
-    // if(socket.handshake.query.joinRoom){
-    //     let r = getRoom();
-    //     if(r) socket.join(r.id);
-    // }
 
     socket.on('join-room', (data) => {
         if(data.room && data.username){
             socket.join(data.room, onSocketJoinRoom(socket, data));
         }
     });
+
+    socket.on('leave-room', (data) => {
+        if(data.room){
+            socket.leave(data.room);
+
+            let room = getRoomById(data.room);
+            let clientsLng = room.clients.length-1;
+            console.log(`please free me from the room ${data.room}, has ${clientsLng +1} clients`);
+
+            // remove user
+            if(room & clientsLng > 0){
+                room.clients = room.clients.filter(user => user.id != socket.id)
+                console.log('Room now has ' + clientsLng+1 + ' clients');
+            };
+            
+            // and then if there's no users in the room
+            if(room && clientsLng == 0){
+                resetRoom(room, true);
+                console.log('room cleaned');
+            }
+        }
+    });
     
     socket.on('disconnect', function(){
-        let b = getRoomByUserId(socket.id);
-        console.log(`Usuario desconectado ${socket.id}, estaba en una sala? ${ b ? 'si, sala '+b : 'no'}`);        
+        let room = getRoomByUserId(socket.id);
+        if(room) room.clients = room.clients.filter(user => user.id != socket.id);         
+        
+        if(room && room.clients.length == 0){
+            resetRoom(room, true);
+        }
+        
+        console.log(`Usuario desconectado ${socket.id}, estaba en una sala? ${ room ? 'si, sala '+room.id : 'no'}`);      
     });
-
-    // socket.on('get-users-in-room', (room) => {
-    //     io.sockets.to(socket.id).emit('get-users-in-room', message);
-    // });
 }
 
 // Once a user join a room
@@ -155,17 +170,7 @@ function onSocketJoinRoom(socket, data){
         if(message.content == room.word && socket.id != room.playerTurnID){
             console.log(`User ${message.author} WON THE GAME!`);
 
-            let davinci = getNewDavinci(room);
-            io.sockets.in(message.room).emit('game-davinci-update', davinci.id);
-
-            room.word = getNewWord();
-            room.gameHelpers.wordHint = "_".repeat(room.word.length);
-            room.lastWordUpdate = new Date();
-
-            let user = room.clients.find(user => user.id == socket.id);
-            io.sockets.in(message.room).emit('game-points-update', {user: socket.id, points: user.points + 50});
-
-            console.log('New davinci!:', davinci);
+            onUserGuess(message, room, socket);
         }
     });
 
@@ -186,6 +191,7 @@ http.listen(3000, function(){
 /**
  * Helpers / functions
  */
+
 function getAvailableRoom(){
     return rooms.find(el => el.clients.length < maxRoomClient);
 }
@@ -194,37 +200,26 @@ function getRoomById(id){
     return rooms.find(el => el.id == id);
 }
 
+/**
+ * 
+ * @param {string} id
+ * @returns {object} room
+ */
 function getRoomByUserId(id){
     let res;
     rooms.forEach(room => {
         if(room.clients.find(el => el.id == id)){
-            res = room.id;
+            res = room;
         }
     });
     return res;
 }
 
-function getNewWord(){
-    return words[randomInt(words.length -1)];
-}
-
-function randomInt(max){
-    return Math.floor(Math.random() * (max - 0 + 1)) + 0;
-}
-
-function setCharAt(str, index, chr){
-    if (index > str.length - 1) return str;
-    return str.substr(0, index) + chr + str.substr(index + 1);
-}
-
-function shuffle(a) {
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-}
-
+/**
+ * 
+ * @param {object} room 
+ * @returns {string} PlayerID
+ */
 function getNewDavinci(room){
     if(room){
         let next = 0;
@@ -233,6 +228,8 @@ function getNewDavinci(room){
             next = currDI + 1;
         }        
         let nextDavinci = room.clients[next];
+        nextDavinci.guess = true;   // set this because otherwise when check with "clients.every users.guess" 
+                                    // always it's going to return false
 
         room.playerTurnID = nextDavinci.id;
         return nextDavinci;
@@ -241,6 +238,49 @@ function getNewDavinci(room){
     }
 }
 
+/**
+ * Changue drawer, update word and emit the new word
+ * @param {object} data message data
+ * @param {object} room room object
+ * @param {object} socket socket object
+ */
+function onUserGuess(data, room, socket){
+    let user = room.clients.find(user => user.id == socket.id);
+    user.points += 50;
+    user.guess = true;
+
+    // if: only 2 users or all users guessed
+    if(room.clients.length -1  <= 1 || room.clients.every((user) => user.guess)){
+        prepareRoomNewMatch(room);
+                
+        changeDavinci(data.room, getNewDavinci(room).id);
+    }
+
+    io.sockets.in(data.room).emit('game-points-update', {user: socket.id, points: user.points});
+}
+
+/**
+ * 
+ * @param {object} room 
+ */
+function prepareRoomNewMatch(room){
+    room.word = getNewWord();
+    room.gameHelpers.wordHint = "_".repeat(room.word.length);
+    room.lastWordUpdate = new Date();
+    room.clients = room.clients.map(user => user.guess = false);
+    
+    let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
+    room.gameHelpers.shuffledWord = shuffle(w_array);
+
+    io.sockets.in(room.id).emit('game-word-update', {type: 'word-update', wordLength: room.word.length});
+    // io.sockets.in(room.id).emit('game-word-update', {type: 'hint-update', wordLength: room.word.length});
+}
+
+/**
+ * Send a event telling everyone the new davinci
+ * @param {string} roomID room to send the event
+ * @param {string} playerTurnID new davinci ID
+ */
 function changeDavinci(roomID, playerTurnID){
     io.sockets.in(roomID).emit('game-davinci-update', playerTurnID);
 
@@ -264,4 +304,51 @@ function initHintInterval(room){
             // TIME IS OVER. GET NEW WORD AND NEW DAVINCI
         }
     }
+}
+
+function resetRoom(room, resetClients){
+    if(room.gameHelpers.intvHintUpdt) clearInterval(room.gameHelpers.intvHintUpdt);
+
+    room.word = getNewWord();
+    if(resetClients) room.clients = [];
+    room = {
+        id: room.id,
+        playerTurnID: "",
+        word: "",    
+        gameHelpers: {
+            wordHint: "",
+            lastWordUpdate: new Date(),
+            shuffledWord: [],
+            intvHintUpdt: null
+        },
+    }
+
+    room.word = getNewWord();
+    room.gameHelpers.wordHint = "_".repeat(room.word.length);
+
+    let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
+    room.gameHelpers.shuffledWord = shuffle(w_array);
+}
+
+
+
+function getNewWord(){
+    return words[randomInt(words.length -1)];
+}
+
+function randomInt(max){
+    return Math.floor(Math.random() * (max - 0 + 1)) + 0;
+}
+
+function setCharAt(str, index, chr){
+    if (index > str.length - 1) return str;
+    return str.substr(0, index) + chr + str.substr(index + 1);
+}
+
+function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
 }
