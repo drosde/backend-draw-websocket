@@ -8,6 +8,10 @@ const cors = require('cors');
 var maxRoomClient = 5;
 var words = ('remera,iglesia,perro,gato,mariposa,cerveza,hacha,escuela,'+
             'cama,calle,sol,murcielago,campana,mouse,auricular,tren,automovil,ventana').split(',');
+
+// var words = ('pedestrian,organisation,demonstration,consultation,constitution,superintendent,expenditure,cell phone,reflection'+
+//             ',expression,legislation,federation,prevalence,vegetarian,illustrate,negotiation,wilderness,researcher,consciousness'+
+//             ',disappoint,civilization,achievement,destruction,disturbance,appreciate').split(',');
 var rooms = [{
     id: 'room1',
     clients: [],
@@ -252,6 +256,8 @@ function onUserGuess(data, room, socket){
     // if: only 2 users or all users guessed
     if(room.clients.length -1  <= 1 || room.clients.every((user) => user.guess)){
         prepareRoomNewMatch(room);
+
+        console.log("Match Ended");
                 
         changeDavinci(data.room, getNewDavinci(room).id);
     }
@@ -282,10 +288,11 @@ function prepareRoomNewMatch(room){
  * @param {string} playerTurnID new davinci ID
  */
 function changeDavinci(roomID, playerTurnID){
-    io.sockets.in(roomID).emit('game-davinci-update', playerTurnID);
-
     let room = getRoomById(roomID);
+    io.sockets.in(roomID).emit('game-davinci-update', playerTurnID);
+    
     if(room){
+        io.sockets.to(playerTurnID).emit('game-word-update', {type: 'word-2draw', word: room.word});
         room.playerTurnID = playerTurnID;
     }
 }
