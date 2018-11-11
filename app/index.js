@@ -3,6 +3,8 @@ var http = require('http').Server(app);
 var io = require('socket.io')(http);
 const cors = require('cors');
 
+var helper = require('./helpers');
+
 
 // simulate storage server
 var maxRoomClient = 5;
@@ -21,7 +23,8 @@ var rooms = [{
         wordHint: "",
         lastWordUpdate: new Date(),
         shuffledWord: [],
-        intvHintUpdt: null
+        intvHintUpdt: null,
+        points: []
     },
 },{
     id: 'room2',
@@ -32,28 +35,18 @@ var rooms = [{
         wordHint: "",
         lastWordUpdate: new Date(),
         shuffledWord: [],
-        intvHintUpdt: null
-    },
-},{
-    id: 'room3',
-    clients: [],
-    playerTurnID: "",
-    word: "",    
-    gameHelpers: {
-        wordHint: "",
-        lastWordUpdate: new Date(),
-        shuffledWord: [],
-        intvHintUpdt: null
+        intvHintUpdt: null,
+        points: []
     },
 }];
 
 rooms.forEach(room => {
-    room.word = getNewWord();
+    room.word = helper.getNewWord(words);
     room.gameHelpers.wordHint = "_".repeat(room.word.length);
 
     let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
 
-    room.gameHelpers.shuffledWord = shuffle(w_array);
+    room.gameHelpers.shuffledWord = helper.shuffle(w_array);
 })
 
 /**
@@ -100,38 +93,18 @@ function onConnection(socket){
             socket.join(data.room, onSocketJoinRoom(socket, data));
         }
     });
-
-    socket.on('leave-room', (data) => {
-        if(data.room){
-            socket.leave(data.room);
-
-            let room = getRoomById(data.room);
-            let clientsLng = room.clients.length-1;
-            console.log(`please free me from the room ${data.room}, has ${clientsLng +1} clients`);
-
-            // remove user
-            if(room & clientsLng > 0){
-                room.clients = room.clients.filter(user => user.id != socket.id)
-                console.log('Room now has ' + clientsLng+1 + ' clients');
-            };
-            
-            // and then if there's no users in the room
-            if(room && clientsLng == 0){
-                resetRoom(room, true);
-                console.log('room cleaned');
-            }
-        }
-    });
+    
+    socket.on('leave-room', data => onSocketLeaveRoom(socket, data));
     
     socket.on('disconnect', function(){
         let room = getRoomByUserId(socket.id);
         if(room) room.clients = room.clients.filter(user => user.id != socket.id);         
         
         if(room && room.clients.length == 0){
-            resetRoom(room, true);
+            resetRoom(room.id);
         }
         
-        console.log(`Usuario desconectado ${socket.id}, estaba en una sala? ${ room ? 'si, sala '+room.id : 'no'}`);      
+        console.log(`Usuario desconectado ${socket.id}, sala ${ room ? 'si, '+room.id : 'no'}`);      
     });
 }
 
@@ -140,26 +113,29 @@ function onSocketJoinRoom(socket, data){
     let c_room = getRoomById(data.room);
     let user = {
         username: data.username,
-        // drawing: c_room.clients.length == 0 ? true : false,
         points: 0,
         id: socket.id,
     }
 
     // if room is empty
+    console.log('Room is empty?', c_room.clients.length == 0 );
     if(c_room.clients.length == 0){        
         // without timeout the clients doesn't receive this
         setTimeout(() => changeDavinci(data.room, socket.id), 500);
 
         // Start sending hints
         c_room.gameHelpers.intvHintUpdt = setInterval(() => initHintInterval(c_room), 18000 / 2.2);
+        // console.log('START THE DEAM INTV');
+        console.log('WORD:', c_room.word);
     }
 
-    if(c_room) c_room.clients.push(user)
-    console.log("Ingresando usuario a la sala: ", data.room + " "+ data.username);    
+    if(c_room) c_room.clients.push(user) 
+    console.log(`User ${data.username} join room ${data.room}`);
+    process.stdout.write("\n");
 
     // RECEIVE DRAW EVENT FROM Davinci AND BROADCAST TO USERS IN ROOM: MSG.ROOM
-    socket.on('drawed-data', (msg) => {
-        socket.broadcast.in(msg.room).emit('drawed-data', msg);
+    socket.on('drawed-data', msg => {
+        if(msg.id == c_room.playerTurnID) socket.broadcast.in(msg.room).emit('drawed-data', msg)
     });
 
     // SAME AS ABOVE
@@ -168,21 +144,47 @@ function onSocketJoinRoom(socket, data){
         io.sockets.in(message.room).emit('chat-message', message);
 
         let room = getRoomById(message.room);
-        console.log(`Word: ${room.word}`);
 
         // victory
         if(message.content == room.word && socket.id != room.playerTurnID){
-            console.log(`User ${message.author} WON THE GAME!`);
-
             onUserGuess(message, room, socket);
         }
     });
 
     // SEND USER CONNECTED EVENT TO ALL USERS IN THAT ROOM
-    socket.broadcast.in(data.room).emit('user-connected-room', user);
+    socket.broadcast.in(data.room).emit('user-join-leave-room', {type: 'join', user});
 
     // SEND INFO OF THAT ROOM TO USER CONNECTED
-    io.sockets.to(socket.id).emit('room-info', {clients: c_room.clients, playerTurnID: c_room.playerTurnID, wordLength: c_room.word.length});
+    io.sockets.to(socket.id).emit('room-info', {
+        clients: c_room.clients, 
+        playerTurnID: c_room.playerTurnID, 
+        wordLength: c_room.word.length,
+        wordHint: c_room.gameHelpers.wordHint
+    });
+}
+
+function onSocketLeaveRoom(socket, data){
+    if(data.room){
+        socket.leave(data.room);
+
+        let room = getRoomById(data.room);
+        let clients = room.clients;
+
+        room.clients = room.clients.filter(user => user.id != socket.id); // sacamos al cliente de la lista
+
+        io.sockets.in(data.room).emit('user-join-leave-room', {type: 'leave', id: socket.id}); // avisamos q se fue
+
+        if(room && clients.length-1 === 0){
+            resetRoom(room.id);
+            console.log('room cleaned');
+            process.stdout.write("\n");
+            process.stdout.write("\n");
+        }else if(room){
+            if(room.playerTurnID === socket.id){
+                changeDavinci(data.room, getNewDavinci(room).id);
+            }
+        }
+    }
 }
 
 /**
@@ -210,13 +212,7 @@ function getRoomById(id){
  * @returns {object} room
  */
 function getRoomByUserId(id){
-    let res;
-    rooms.forEach(room => {
-        if(room.clients.find(el => el.id == id)){
-            res = room;
-        }
-    });
-    return res;
+    return rooms.find(room => room.clients.find(us => us.id == id));
 }
 
 /**
@@ -233,8 +229,7 @@ function getNewDavinci(room){
         }        
         let nextDavinci = room.clients[next];
         nextDavinci.guess = true;   // set this because otherwise when check with "clients.every users.guess" 
-                                    // always it's going to return false
-
+                                    // always it's going to return false                                    
         room.playerTurnID = nextDavinci.id;
         return nextDavinci;
     }else{
@@ -248,7 +243,9 @@ function getNewDavinci(room){
  * @param {object} room room object
  * @param {object} socket socket object
  */
-function onUserGuess(data, room, socket){
+function onUserGuess(data, room, socket){    
+    console.log(`User ${data.author} WON THE GAME!`);
+
     let user = room.clients.find(user => user.id == socket.id);
     user.points += 50;
     user.guess = true;
@@ -258,6 +255,7 @@ function onUserGuess(data, room, socket){
         prepareRoomNewMatch(room);
 
         console.log("Match Ended");
+        process.stdout.write("\n");
                 
         changeDavinci(data.room, getNewDavinci(room).id);
     }
@@ -270,13 +268,14 @@ function onUserGuess(data, room, socket){
  * @param {object} room 
  */
 function prepareRoomNewMatch(room){
-    room.word = getNewWord();
+    room.word = helper.getNewWord(words);
     room.gameHelpers.wordHint = "_".repeat(room.word.length);
     room.lastWordUpdate = new Date();
-    room.clients = room.clients.map(user => user.guess = false);
+    
+    room.clients.map(user => user.guess = false); // reset gues status
     
     let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
-    room.gameHelpers.shuffledWord = shuffle(w_array);
+    room.gameHelpers.shuffledWord = helper.shuffle(w_array);
 
     io.sockets.in(room.id).emit('game-word-update', {type: 'word-update', wordLength: room.word.length});
     // io.sockets.in(room.id).emit('game-word-update', {type: 'hint-update', wordLength: room.word.length});
@@ -288,6 +287,8 @@ function prepareRoomNewMatch(room){
  * @param {string} playerTurnID new davinci ID
  */
 function changeDavinci(roomID, playerTurnID){
+    console.log('change davinci', playerTurnID);
+
     let room = getRoomById(roomID);
     io.sockets.in(roomID).emit('game-davinci-update', playerTurnID);
     
@@ -299,12 +300,17 @@ function changeDavinci(roomID, playerTurnID){
 
 //Calculate match time with Math.abs(date1 - date2) / (1000 * 60)
 function initHintInterval(room){
+    console.log('calling int', room.clients);
     if(room){
         let poped = room.gameHelpers.shuffledWord.pop();
+        console.log('Word poped', poped);
+        console.log('from words:', helper.compressShuffledStr(room.gameHelpers.shuffledWord));
+
+        process.stdout.write("\n");
         if(poped){
-            room.gameHelpers.wordHint = setCharAt(room.gameHelpers.wordHint, poped.pos, poped.ltt);
-            console.log(`New letter ADDED: POSITION ${poped.pos}, LETTER ${poped.ltt}.`);
-            console.log(`Updated room hint: ${room.gameHelpers.wordHint} Shufled Word: ${JSON.stringify(room.gameHelpers.shuffledWord)}`);
+            room.gameHelpers.wordHint = helper.setCharAt(room.gameHelpers.wordHint, poped.pos, poped.ltt);
+            // console.log(`New letter ADDED: POSITION ${poped.pos}, LETTER ${poped.ltt}.`);
+            // console.log(`Updated room hint: ${room.gameHelpers.wordHint} Shufled Word: ${JSON.stringify(room.gameHelpers.shuffledWord)}`);
 
             io.sockets.in(room.id).emit('game-word-update', {type: 'hint-update', hint: room.gameHelpers.wordHint});
         }else{
@@ -313,49 +319,24 @@ function initHintInterval(room){
     }
 }
 
-function resetRoom(room, resetClients){
-    if(room.gameHelpers.intvHintUpdt) clearInterval(room.gameHelpers.intvHintUpdt);
+function resetRoom(roomID){
+    let room = getRoomById(roomID);
 
-    room.word = getNewWord();
-    if(resetClients) room.clients = [];
-    room = {
-        id: room.id,
-        playerTurnID: "",
-        word: "",    
-        gameHelpers: {
-            wordHint: "",
-            lastWordUpdate: new Date(),
-            shuffledWord: [],
-            intvHintUpdt: null
-        },
-    }
-
-    room.word = getNewWord();
+    room.word = helper.getNewWord(words);
     room.gameHelpers.wordHint = "_".repeat(room.word.length);
 
     let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
-    room.gameHelpers.shuffledWord = shuffle(w_array);
-}
+    room.gameHelpers.shuffledWord = helper.shuffle(w_array);
 
+    room.clients = [];
 
-
-function getNewWord(){
-    return words[randomInt(words.length -1)];
-}
-
-function randomInt(max){
-    return Math.floor(Math.random() * (max - 0 + 1)) + 0;
-}
-
-function setCharAt(str, index, chr){
-    if (index > str.length - 1) return str;
-    return str.substr(0, index) + chr + str.substr(index + 1);
-}
-
-function shuffle(a) {
-    for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
+    room.gameHelpers.lastWordUpdate = new Date();
+    
+    if(room.gameHelpers.intvHintUpdt){
+        clearInterval(room.gameHelpers.intvHintUpdt);
+        room.gameHelpers.intvHintUpdt = null;
+        // console.log(`Interval limpio? `, room.gameHelpers.intvHintUpdt);
+    } 
+    
+    console.log(`New room word: ${room.word}, suffled:`, helper.compressShuffledStr(room.gameHelpers.shuffledWord));
 }
