@@ -11,9 +11,6 @@ var maxRoomClient = 5;
 var words = ('remera,iglesia,perro,gato,mariposa,cerveza,hacha,escuela,'+
             'cama,calle,sol,murcielago,campana,mouse,auricular,tren,automovil,ventana').split(',');
 
-// var words = ('pedestrian,organisation,demonstration,consultation,constitution,superintendent,expenditure,cell phone,reflection'+
-//             ',expression,legislation,federation,prevalence,vegetarian,illustrate,negotiation,wilderness,researcher,consciousness'+
-//             ',disappoint,civilization,achievement,destruction,disturbance,appreciate').split(',');
 var rooms = [{
     id: 'room1',
     clients: [],
@@ -24,7 +21,10 @@ var rooms = [{
         lastWordUpdate: new Date(),
         shuffledWord: [],
         intvHintUpdt: null,
-        points: []
+        points: [],
+        histDrawn: {
+            points: {lines: "", dot: "" }
+        }
     },
 },{
     id: 'room2',
@@ -36,7 +36,8 @@ var rooms = [{
         lastWordUpdate: new Date(),
         shuffledWord: [],
         intvHintUpdt: null,
-        points: []
+        points: [],
+        histDrawn: {points: {lines: "", dot: "" }}
     },
 }];
 
@@ -47,6 +48,13 @@ rooms.forEach(room => {
     let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
 
     room.gameHelpers.shuffledWord = helper.shuffle(w_array);
+
+    // room.gameHelpers.histDrawn = {
+    //     points: {
+    //         lines: "",
+    //         dot: ""
+    //     }
+    // }
 })
 
 /**
@@ -129,13 +137,59 @@ function onSocketJoinRoom(socket, data){
         console.log('WORD:', c_room.word);
     }
 
+    // ADD USER TO ROOM AND SEND USER CONNECTED EVENT TO ALL USERS IN THAT ROOM
     if(c_room) c_room.clients.push(user) 
+    
+    socket.broadcast.in(data.room).emit('user-join-leave-room', {type: 'join', user});
+
     console.log(`User ${data.username} join room ${data.room}`);
-    process.stdout.write("\n");
+    process.stdout.write("\n");   
+    
+    // 1. SEND INFO OF THAT ROOM TO USER CONNECTED
+    io.sockets.to(socket.id).emit('room-info', {
+        clients: c_room.clients, 
+        playerTurnID: c_room.playerTurnID, 
+        wordLength: c_room.word.length,
+        wordHint: c_room.gameHelpers.wordHint
+    });
+
+    // TODO: Join these events (1 & 2)
+    // 2. SEND HISTORIAL
+    let histD = c_room.gameHelpers.histDrawn.points;
+    if(histD.lines.length > 0 || histD.dot.length > 0){
+        setTimeout(() => {
+            io.sockets.to(socket.id).emit('drawed-data', {
+                points: c_room.gameHelpers.histDrawn.points
+            }); 
+        }, 2000);
+    }
 
     // RECEIVE DRAW EVENT FROM Davinci AND BROADCAST TO USERS IN ROOM: MSG.ROOM
     socket.on('drawed-data', msg => {
-        if(msg.id == c_room.playerTurnID) socket.broadcast.in(msg.room).emit('drawed-data', msg)
+        if(msg.id == c_room.playerTurnID) {
+            socket.broadcast.in(msg.room).emit('drawed-data', msg);
+
+            let hist = c_room.gameHelpers.histDrawn.points;
+            let points = msg.points;
+
+            for(var prop in hist){
+                var p = points[prop];
+                hist[prop] += hist[prop].length == 0 || p.charAt(hist[prop].length - 1) == "," ? p : "," + p;
+            }
+
+            // let hist = c_room.gameHelpers.histDrawn.points;
+            // if(msg.points.lines.length > 0){ 
+            //     let line = msg.points.lines;
+            //     line = hist.lines.length == 0 || hist.lines.charAt(hist.lines.length - 1) == "," ? line : "," + line;
+            //     c_room.gameHelpers.histDrawn.points.lines += line;
+            // }
+
+            // if(msg.points.dot.length > 0){ 
+            //     let dot = msg.points.dot;
+            //     dot = hist.dot.length == 0 || hist.dot.charAt(hist.dot.length - 1) == "," ? dot : "," + dot;
+            //     c_room.gameHelpers.histDrawn.points.dot += dot;
+            // }
+        }
     });
 
     // SAME AS ABOVE
@@ -149,17 +203,6 @@ function onSocketJoinRoom(socket, data){
         if(message.content == room.word && socket.id != room.playerTurnID){
             onUserGuess(message, room, socket);
         }
-    });
-
-    // SEND USER CONNECTED EVENT TO ALL USERS IN THAT ROOM
-    socket.broadcast.in(data.room).emit('user-join-leave-room', {type: 'join', user});
-
-    // SEND INFO OF THAT ROOM TO USER CONNECTED
-    io.sockets.to(socket.id).emit('room-info', {
-        clients: c_room.clients, 
-        playerTurnID: c_room.playerTurnID, 
-        wordLength: c_room.word.length,
-        wordHint: c_room.gameHelpers.wordHint
     });
 }
 
@@ -221,7 +264,7 @@ function getRoomByUserId(id){
  * @returns {string} PlayerID
  */
 function getNewDavinci(room){
-    if(room){
+    if(room && room.clients.length > 0){
         let next = 0;
         let currDI = room.clients.findIndex(us => us.id == room.playerTurnID);
         if(currDI != room.clients.length -1){
@@ -260,7 +303,7 @@ function onUserGuess(data, room, socket){
         changeDavinci(data.room, getNewDavinci(room).id);
     }
 
-    io.sockets.in(data.room).emit('game-points-update', {user: socket.id, points: user.points});
+    io.sockets.in(data.room).emit('game-points-update', {user: socket.id, score: user.points});
 }
 
 /**
@@ -295,18 +338,25 @@ function changeDavinci(roomID, playerTurnID){
     if(room){
         io.sockets.to(playerTurnID).emit('game-word-update', {type: 'word-2draw', word: room.word});
         room.playerTurnID = playerTurnID;
+        room.gameHelpers.histDrawn = {
+            points: {
+                lines: "",
+                dot: ""
+            }
+        };
     }
 }
 
 //Calculate match time with Math.abs(date1 - date2) / (1000 * 60)
 function initHintInterval(room){
-    console.log('calling int', room.clients);
+    // console.log('calling int', room.clients);
     if(room){
         let poped = room.gameHelpers.shuffledWord.pop();
-        console.log('Word poped', poped);
-        console.log('from words:', helper.compressShuffledStr(room.gameHelpers.shuffledWord));
 
-        process.stdout.write("\n");
+        // console.log('Word poped', poped);
+        // console.log('from words:', helper.compressShuffledStr(room.gameHelpers.shuffledWord));
+        // process.stdout.write("\n");
+        
         if(poped){
             room.gameHelpers.wordHint = helper.setCharAt(room.gameHelpers.wordHint, poped.pos, poped.ltt);
             // console.log(`New letter ADDED: POSITION ${poped.pos}, LETTER ${poped.ltt}.`);
@@ -331,6 +381,13 @@ function resetRoom(roomID){
     room.clients = [];
 
     room.gameHelpers.lastWordUpdate = new Date();
+
+    room.gameHelpers.histDrawn = {
+        points: {
+            lines: "",
+            dot: ""
+        }
+    };
     
     if(room.gameHelpers.intvHintUpdt){
         clearInterval(room.gameHelpers.intvHintUpdt);
