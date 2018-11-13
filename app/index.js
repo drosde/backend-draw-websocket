@@ -174,21 +174,10 @@ function onSocketJoinRoom(socket, data){
 
             for(var prop in hist){
                 var p = points[prop];
-                hist[prop] += hist[prop].length == 0 || p.charAt(hist[prop].length - 1) == "," ? p : "," + p;
+                if(typeof p == "string"){
+                    hist[prop] += hist[prop].length == 0 || p.charAt(hist[prop].length - 1) == "," ? p : "," + p;
+                }
             }
-
-            // let hist = c_room.gameHelpers.histDrawn.points;
-            // if(msg.points.lines.length > 0){ 
-            //     let line = msg.points.lines;
-            //     line = hist.lines.length == 0 || hist.lines.charAt(hist.lines.length - 1) == "," ? line : "," + line;
-            //     c_room.gameHelpers.histDrawn.points.lines += line;
-            // }
-
-            // if(msg.points.dot.length > 0){ 
-            //     let dot = msg.points.dot;
-            //     dot = hist.dot.length == 0 || hist.dot.charAt(hist.dot.length - 1) == "," ? dot : "," + dot;
-            //     c_room.gameHelpers.histDrawn.points.dot += dot;
-            // }
         }
     });
 
@@ -202,6 +191,18 @@ function onSocketJoinRoom(socket, data){
         // victory
         if(message.content == room.word && socket.id != room.playerTurnID){
             onUserGuess(message, room, socket);
+        }
+    });
+
+    socket.on('game-change-color', (data) => {
+        if(data.id == c_room.playerTurnID && data && data.color) {
+            socket.broadcast.in(data.room).emit('game-change-color', data.color);
+        }
+    });
+
+    socket.on('game-clear-canvas', (data) => {
+        if(data.id == c_room.playerTurnID) {
+            socket.broadcast.in(data.room).emit('game-clear-canvas');
         }
     });
 }
@@ -304,6 +305,10 @@ function onUserGuess(data, room, socket){
     }
 
     io.sockets.in(data.room).emit('game-points-update', {user: socket.id, score: user.points});
+
+    io.sockets.in(data.room).emit('game-clear-canvas');
+
+    io.sockets.in(data.room).emit('game-change-color', "#fff");
 }
 
 /**
