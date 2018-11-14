@@ -48,13 +48,6 @@ rooms.forEach(room => {
     let w_array = room.word.split("").map((ltt, i) => ltt = {pos: i, ltt: ltt});
 
     room.gameHelpers.shuffledWord = helper.shuffle(w_array);
-
-    // room.gameHelpers.histDrawn = {
-    //     points: {
-    //         lines: "",
-    //         dot: ""
-    //     }
-    // }
 })
 
 /**
@@ -159,7 +152,8 @@ function onSocketJoinRoom(socket, data){
     if(histD.lines.length > 0 || histD.dot.length > 0){
         setTimeout(() => {
             io.sockets.to(socket.id).emit('drawed-data', {
-                points: c_room.gameHelpers.histDrawn.points
+                points: c_room.gameHelpers.histDrawn.points,
+                color: "#fff"
             }); 
         }, 2000);
     }
@@ -191,12 +185,6 @@ function onSocketJoinRoom(socket, data){
         // victory
         if(message.content == room.word && socket.id != room.playerTurnID){
             onUserGuess(message, room, socket);
-        }
-    });
-
-    socket.on('game-change-color', (data) => {
-        if(data.id == c_room.playerTurnID && data && data.color) {
-            socket.broadcast.in(data.room).emit('game-change-color', data.color);
         }
     });
 
@@ -239,50 +227,12 @@ http.listen(3000, function(){
 });
 
 /**
- * Helpers / functions
+ * Helpers / functions *
  */
 
-function getAvailableRoom(){
-    return rooms.find(el => el.clients.length < maxRoomClient);
-}
-
-function getRoomById(id){
-    return rooms.find(el => el.id == id);
-}
-
+ 
 /**
- * 
- * @param {string} id
- * @returns {object} room
- */
-function getRoomByUserId(id){
-    return rooms.find(room => room.clients.find(us => us.id == id));
-}
-
-/**
- * 
- * @param {object} room 
- * @returns {string} PlayerID
- */
-function getNewDavinci(room){
-    if(room && room.clients.length > 0){
-        let next = 0;
-        let currDI = room.clients.findIndex(us => us.id == room.playerTurnID);
-        if(currDI != room.clients.length -1){
-            next = currDI + 1;
-        }        
-        let nextDavinci = room.clients[next];
-        nextDavinci.guess = true;   // set this because otherwise when check with "clients.every users.guess" 
-                                    // always it's going to return false                                    
-        room.playerTurnID = nextDavinci.id;
-        return nextDavinci;
-    }else{
-        return null;
-    }
-}
-
-/**
- * Changue drawer, update word and emit the new word
+ * Change drawer, update word and emit a new word
  * @param {object} data message data
  * @param {object} room room object
  * @param {object} socket socket object
@@ -307,8 +257,6 @@ function onUserGuess(data, room, socket){
     io.sockets.in(data.room).emit('game-points-update', {user: socket.id, score: user.points});
 
     io.sockets.in(data.room).emit('game-clear-canvas');
-
-    io.sockets.in(data.room).emit('game-change-color', "#fff");
 }
 
 /**
@@ -352,21 +300,52 @@ function changeDavinci(roomID, playerTurnID){
     }
 }
 
+function getAvailableRoom(){
+    return rooms.find(el => el.clients.length < maxRoomClient);
+}
+
+function getRoomById(id){
+    return rooms.find(el => el.id == id);
+}
+
+/**
+ * 
+ * @param {string} id
+ * @returns {object} room
+ */
+function getRoomByUserId(id){
+    return rooms.find(room => room.clients.find(us => us.id == id));
+}
+
+/**
+ * 
+ * @param {object} room 
+ * @returns {string} PlayerID
+ */
+function getNewDavinci(room){
+    if(room && room.clients.length > 0){
+        let next = 0;
+        let currDI = room.clients.findIndex(us => us.id == room.playerTurnID);
+        if(currDI != room.clients.length -1){
+            next = currDI + 1;
+        }        
+        let nextDavinci = room.clients[next];
+        nextDavinci.guess = true;   // set this because otherwise when check with "clients.every users.guess" 
+                                    // always it's going to return false                                    
+        room.playerTurnID = nextDavinci.id;
+        return nextDavinci;
+    }else{
+        return null;
+    }
+}
+
 //Calculate match time with Math.abs(date1 - date2) / (1000 * 60)
 function initHintInterval(room){
-    // console.log('calling int', room.clients);
     if(room){
         let poped = room.gameHelpers.shuffledWord.pop();
-
-        // console.log('Word poped', poped);
-        // console.log('from words:', helper.compressShuffledStr(room.gameHelpers.shuffledWord));
-        // process.stdout.write("\n");
         
         if(poped){
             room.gameHelpers.wordHint = helper.setCharAt(room.gameHelpers.wordHint, poped.pos, poped.ltt);
-            // console.log(`New letter ADDED: POSITION ${poped.pos}, LETTER ${poped.ltt}.`);
-            // console.log(`Updated room hint: ${room.gameHelpers.wordHint} Shufled Word: ${JSON.stringify(room.gameHelpers.shuffledWord)}`);
-
             io.sockets.in(room.id).emit('game-word-update', {type: 'hint-update', hint: room.gameHelpers.wordHint});
         }else{
             // TIME IS OVER. GET NEW WORD AND NEW DAVINCI
