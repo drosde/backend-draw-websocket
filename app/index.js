@@ -24,7 +24,9 @@ var rooms = [{
         points: [],
         histDrawn: {
             points: {lines: "", dot: "" }
-        }
+        },
+        timer: 0,
+        lastTimerUpdate: null
     },
 },{
     id: 'room2',
@@ -37,7 +39,9 @@ var rooms = [{
         shuffledWord: [],
         intvHintUpdt: null,
         points: [],
-        histDrawn: {points: {lines: "", dot: "" }}
+        histDrawn: {points: {lines: "", dot: "" }},
+        timer: 0,
+        lastTimerUpdate: null
     },
 }];
 
@@ -124,8 +128,8 @@ function onSocketJoinRoom(socket, data){
         // without timeout the clients doesn't receive this
         setTimeout(() => changeDavinci(data.room, socket.id), 500);
 
-        // Start sending hints
-        c_room.gameHelpers.intvHintUpdt = setInterval(() => initHintInterval(c_room), 18000 / 2.2);
+        // Start sending hints. MAX TIME / WORD LENGHT -> TO MS
+        c_room.gameHelpers.intvHintUpdt = setInterval(() => initHintInterval(c_room), (90 / c_room.word.length) * 1000);
         // console.log('START THE DEAM INTV');
         console.log('WORD:', c_room.word);
     }
@@ -136,6 +140,11 @@ function onSocketJoinRoom(socket, data){
     socket.broadcast.in(data.room).emit('user-join-leave-room', {type: 'join', user});
 
     console.log(`User ${data.username} join room ${data.room}`);
+
+    var time = new Date();
+    var roomTime = c_room.gameHelpers.lastTimerUpdate ? (Math.abs(time - c_room.gameHelpers.lastTimerUpdate) / 1000) + c_room.gameHelpers.timer : 0;
+    console.log("room time data", `timer ${c_room.gameHelpers.timer} abs ${Math.abs(time - c_room.gameHelpers.lastTimerUpdate) / 1000}`)
+    console.log("room time", roomTime);
     process.stdout.write("\n");   
     
     // 1. SEND INFO OF THAT ROOM TO USER CONNECTED
@@ -143,7 +152,8 @@ function onSocketJoinRoom(socket, data){
         clients: c_room.clients, 
         playerTurnID: c_room.playerTurnID, 
         wordLength: c_room.word.length,
-        wordHint: c_room.gameHelpers.wordHint
+        wordHint: c_room.gameHelpers.wordHint,
+        roomTime: roomTime
     });
 
     // TODO: Join these events (1 & 2)
@@ -347,6 +357,12 @@ function initHintInterval(room){
         if(poped){
             room.gameHelpers.wordHint = helper.setCharAt(room.gameHelpers.wordHint, poped.pos, poped.ltt);
             io.sockets.in(room.id).emit('game-word-update', {type: 'hint-update', hint: room.gameHelpers.wordHint});
+
+            room.gameHelpers.timer += (90 / room.word.length);
+            room.gameHelpers.lastTimerUpdate = new Date();
+
+            console.log("Tiempo transcurrido ", room.gameHelpers.timer.toFixed(2) + " segundos");
+            console.log("last date", room.gameHelpers.lastTimerUpdate);
         }else{
             // TIME IS OVER. GET NEW WORD AND NEW DAVINCI
         }
@@ -378,6 +394,9 @@ function resetRoom(roomID){
         room.gameHelpers.intvHintUpdt = null;
         // console.log(`Interval limpio? `, room.gameHelpers.intvHintUpdt);
     } 
+
+    room.gameHelpers.timer = 0;
+    room.gameHelpers.lastTimerUpdate = null;
     
     console.log(`New room word: ${room.word}, suffled:`, helper.compressShuffledStr(room.gameHelpers.shuffledWord));
 }
